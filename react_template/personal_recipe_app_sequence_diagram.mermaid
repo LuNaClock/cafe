@@ -1,0 +1,132 @@
+sequenceDiagram
+    title 個人用レシピ管理アプリのシーケンス図
+    
+    %% アクター定義
+    actor User as ユーザー
+    participant App as アプリケーション
+    participant RecipeService as レシピサービス
+    participant YouTubeService as YouTubeサービス
+    participant StorageService as ストレージサービス
+    participant SyncService as 同期サービス
+    participant FirebaseAuth as Firebase認証
+    participant FirebaseFirestore as Firestoreデータベース
+    participant YouTubeAPI as YouTube Data API
+    
+    %% アプリケーション初期化フロー
+    User->>App: アプリケーション起動
+    App->>StorageService: initialize()
+    StorageService-->>App: 初期化完了
+    App->>AuthService: initialize()
+    AuthService->>FirebaseAuth: 認証状態確認
+    FirebaseAuth-->>AuthService: ログイン状態返却
+    AuthService-->>App: 認証状態通知
+    App->>SyncService: initialize()
+    SyncService->>FirebaseFirestore: 接続確立
+    FirebaseFirestore-->>SyncService: 接続成功
+    SyncService-->>App: 同期サービス準備完了
+    App->>RecipeService: getAllRecipes()
+    RecipeService->>StorageService: getAll('recipes')
+    StorageService-->>RecipeService: ローカルレシピデータ
+    RecipeService-->>App: レシピ一覧返却
+    App->>User: レシピ一覧表示
+    
+    %% 新規レシピ作成フロー
+    User->>App: 「新規レシピ」ボタンをクリック
+    App->>User: レシピ編集画面表示
+    User->>App: レシピ情報入力（タイトル、説明、材料など）
+    User->>App: YouTube URLを入力
+    App->>YouTubeService: getVideoInfo(url)
+    YouTubeService->>YouTubeAPI: videoDetails取得リクエスト
+    YouTubeAPI-->>YouTubeService: 動画情報レスポンス
+    YouTubeService-->>App: YouTubeVideo情報
+    App->>User: サムネイル表示と動画情報プレビュー
+    User->>App: 保存ボタンクリック
+    App->>RecipeService: createRecipe(recipeData)
+    RecipeService->>RecipeRepository: save(recipe)
+    RecipeRepository->>StorageService: set('recipes', id, recipe)
+    StorageService-->>RecipeRepository: 保存完了
+    RecipeRepository-->>RecipeService: 保存済みレシピ
+    RecipeService->>SyncService: syncUp()
+    SyncService->>FirebaseFirestore: レシピデータアップロード
+    FirebaseFirestore-->>SyncService: アップロード完了
+    SyncService-->>RecipeService: 同期完了
+    RecipeService-->>App: 作成完了通知
+    App->>User: レシピ詳細画面表示
+    
+    %% レシピ検索フロー
+    User->>App: 検索クエリ入力
+    App->>SearchService: searchRecipes(query)
+    SearchService->>StorageService: query('recipes', predicate)
+    StorageService-->>SearchService: 検索結果
+    SearchService-->>App: フィルタリング済み結果
+    App->>User: 検索結果表示
+    
+    %% レシピ詳細閲覧フロー
+    User->>App: レシピカードをタップ
+    App->>RecipeService: getRecipeById(id)
+    RecipeService->>RecipeRepository: findById(id)
+    RecipeRepository->>StorageService: get('recipes', id)
+    StorageService-->>RecipeRepository: レシピデータ
+    RecipeRepository-->>RecipeService: レシピオブジェクト
+    RecipeService-->>App: レシピ詳細
+    App->>IngredientService: getIngredientsByRecipeId(recipeId)
+    IngredientService->>StorageService: query('ingredients', {recipeId})
+    StorageService-->>IngredientService: 材料リスト
+    IngredientService-->>App: 材料オブジェクト配列
+    App->>StepService: getStepsByRecipeId(recipeId)
+    StepService->>StorageService: query('steps', {recipeId})
+    StorageService-->>StepService: 調理手順リスト
+    StepService-->>App: 調理手順オブジェクト配列
+    App->>YouTubeService: getLinkedVideos(recipeId)
+    YouTubeService->>StorageService: query('videos', {recipeId})
+    StorageService-->>YouTubeService: 関連動画情報
+    YouTubeService-->>App: YouTube動画オブジェクト配列
+    App->>User: レシピ詳細画面表示（材料、手順、動画）
+    
+    %% YouTube動画再生フロー
+    User->>App: 動画サムネイル押下
+    App->>YouTubeService: getEmbedUrl(videoId)
+    YouTubeService-->>App: 埋め込みURL
+    App->>User: YouTube動画プレーヤー表示
+    
+    %% 買い物リスト作成フロー
+    User->>App: 「買い物リストに追加」ボタン押下
+    App->>ShoppingListService: createShoppingList("新しいリスト")
+    ShoppingListService->>StorageService: set('shoppingLists', id, list)
+    StorageService-->>ShoppingListService: 保存完了
+    ShoppingListService-->>App: 新しい買い物リスト
+    App->>ShoppingListService: addItemsFromRecipe(listId, recipeId)
+    ShoppingListService->>IngredientService: getIngredientsByRecipeId(recipeId)
+    IngredientService->>StorageService: query('ingredients', {recipeId})
+    StorageService-->>IngredientService: 材料リスト
+    IngredientService-->>ShoppingListService: 材料オブジェクト配列
+    ShoppingListService->>StorageService: 買い物アイテム追加
+    StorageService-->>ShoppingListService: 保存完了
+    ShoppingListService->>SyncService: syncUp()
+    SyncService->>FirebaseFirestore: 買い物リストアップロード
+    FirebaseFirestore-->>SyncService: アップロード完了
+    SyncService-->>ShoppingListService: 同期完了
+    ShoppingListService-->>App: 更新された買い物リスト
+    App->>User: 買い物リスト画面表示
+    
+    %% デバイス間同期フロー
+    note over User,YouTubeAPI: 他のデバイスでアプリを開いた場合
+    User->>App: 別デバイスでアプリ起動
+    App->>AuthService: getCurrentUser()
+    AuthService->>FirebaseAuth: ユーザー情報取得
+    FirebaseAuth-->>AuthService: ユーザー情報
+    AuthService-->>App: ログインユーザー
+    App->>SyncService: syncDown()
+    SyncService->>FirebaseFirestore: 最新データ取得
+    FirebaseFirestore-->>SyncService: クラウド保存データ
+    SyncService->>StorageService: ローカルデータ取得
+    StorageService-->>SyncService: ローカルデータ
+    SyncService->>SyncService: resolveConflicts(localData, remoteData)
+    SyncService->>StorageService: 同期済みデータ保存
+    StorageService-->>SyncService: 保存完了
+    SyncService-->>App: 同期完了通知
+    App->>RecipeService: getAllRecipes()
+    RecipeService->>StorageService: getAll('recipes')
+    StorageService-->>RecipeService: 同期済みレシピデータ
+    RecipeService-->>App: 最新レシピ一覧
+    App->>User: 最新データで画面更新
